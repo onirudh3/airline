@@ -3,10 +3,10 @@
 matdata <- read.csv("filetoread", header = T, sep = ";", dec = ".")
 
 # Number of markets
-M = 1204
+M = 1176
 
 # Number of players
-N = 20
+N = 12
 
 # Number of Simulations
 S = 1000
@@ -14,7 +14,7 @@ S = 1000
 # Number of cluster to make it in parallel
 Nclust = 40
 
-####Libraries
+#### Libraries
 library(MASS)
 library(data.table)
 library(nloptr)
@@ -22,7 +22,7 @@ library(parallel)
 library(dplyr)
 options(digits = 5)
 
-##### Simulation of error terms for SML N*M*S
+##### Simulation of error terms for SML N * M * S
 set.seed(8769)
 uim = matrix(rnorm(N * M * S, mean = 0, sd = 1), N * M, S)
 u0m = matrix(rnorm(M * S, mean = 0, sd = 1), M, S) #### %*% matrix(rep(1, N), N, 1)
@@ -44,7 +44,7 @@ LC = (matdata$Mainline_Low_Cost == "L") * 1
 Y = as.matrix(matdata$Pres)
 X = as.matrix(rbind(rep(1, N * M), pop[1:(N * M)], wealth[1:(N * M)], dist[1:(N * M)],
                     dist2[1:(N * M)], LC[1:(N * M)], sun[1:(N * M)], City2[1:(N * M)],
-                    Nbroutes[1:(N *M )]))
+                    Nbroutes[1:(N * M)]))
 matexpl = t(X[, 1:(N * M)])
 matN = Ncompet[seq(1, N * M, N)]
 
@@ -78,7 +78,7 @@ Calc_N <- function(s, matexpl, coef, uim, u0m){
     profits = matexpl[ind1:(ind1 + N - 1), ] %*% coef[1:(nvar - 2)] + rho * rep(u0m[m, s], N) + sqrt(1 - rho ^ 2) * uim[ind1:(ind1 + N - 1), s]
 
     # Threshold
-    delta = coef[nvar-1]
+    delta = coef[nvar - 1]
     threshold = delta * log(seq(1, N, 1))
 
     ### Neq
