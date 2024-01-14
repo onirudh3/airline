@@ -1,12 +1,13 @@
-rm(list = ls())
 
 ##### Download the data
-matdata <- read.csv("filetoread", header = T, sep =";", dec =".")
+matdata <- read.csv("filetoread", header = T, sep = ";", dec = ".")
 
 # Number of markets
 M = 1204
+
 # Number of players
 N = 20
+
 # Number of Simulations
 S = 1000
 
