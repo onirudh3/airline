@@ -87,16 +87,20 @@ Calc_N <- function(s, matexpl, coef, uim, u0m){
 
 # Procedure to compute the log-likelihood
 
-loglik <- function(theta){
+loglik <- function(theta) {
 
   # Compute average number of entrants
-  cl <- makeCluster(Nclust) # Function NPred will be called 100 times parallely
-  clusterExport(cl = cl, varlist = c("matexpl", "uim", "u0m", "matN", "M", "N", "nvar"))
+  cl <- makeCluster(Nclust)
+  clusterExport(cl = cl, varlist = c("matexpl", "uim", "u0m", "matN", "M", "N",
+                                     "nvar"))
   Matrice_N <- rowMeans(data.frame(matrix(unlist(parLapply(cl, 1:S, Calc_N, matexpl = matexpl,
                                                            coef = theta, uim = uim, u0m = u0m)),
                                           nrow = M, byrow = F)))
   stopCluster(cl)
-  Matrice_N[Matrice_N == 0] = 1E - 100
+  Matrice_N[Matrice_N == 0] = 1E-100
   loglik = -sum(log(Matrice_N))
   return(loglik)
 }
+
+
+
