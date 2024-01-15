@@ -219,6 +219,35 @@ arr_chars <- data2017 %>%
 entry_data <- left_join(entry_data, dep_chars, by = c("end1" = "ville_dep"))
 entry_data <- left_join(entry_data, arr_chars, by = c("end2" = "ville_arr"))
 
+# Add pop and income product vars for SML
+sml_data <- entry_data %>% 
+  mutate(pop = popdep/1e14 * poparr,
+         income = gdppercapdep*gdppercaparr/1e4,
+         dist = direct_distance/1e4,
+         dist2 = dist^2,
+         slot = as.numeric(Slot_dummy),
+         City1 = as.numeric(City1),
+         City2 = as.numeric(City2),
+         hub = as.numeric(HUB_dummy),
+         I = as.numeric(incumbent),
+         pot_entrant = as.numeric(pot_entrant)) %>% 
+  select(-end1, -end2, -end1_id, -end2_id, -presence_end1_16, -presence_end2_16, 
+         -presence_any_16, -direct_distance, -popdep, -gdpdep, -gdppercapdep, 
+         -poparr, -gdparr, -gdppercaparr)
+
+# Table 3
+
+summary(sml_data) # Note: I think authors might not be including missing markets?
+
+# Table 3 price summary
+data2017 %>% group_by(market) %>% summarize(price50 = median(price),
+                                            price25 = quantile(price,  probs=.25),
+                                            price75 = quantile(price, probs=.75)) %>% 
+  summary()
+
+## Numbers much higher than 2007, inflation expected but seems to go beyond...?
+## Could it also be that we have ROUND TRIP PRICE rather than one-way?
+
 # You need to create the variables City2, Nentrythreats, Hub and 
 # Slot. Because markets are non directional, you need to slightly adapt some of 
 # the deﬁnitions used in Gayle and Wu. For example, you may modify Nentrythreats 
@@ -231,3 +260,111 @@ entry_data <- left_join(entry_data, arr_chars, by = c("end2" = "ville_arr"))
 # average price in a given market.
 
 #------------------------------ SML Procedure -------------------------------#
+# Below copy/pasted from SML procedure code provided by C. Bontemps
+
+# Number of markets
+M=1176
+# Number of players (airlines)
+N=12
+#Number of Simulations (starting small)
+S=1000
+
+#Number of cluster to make it in parallel
+Nclust=8
+
+####Libraries
+library(MASS)
+library(data.table)
+library(nloptr)
+library(parallel)
+library(dplyr)
+options(digits = 5)
+
+##### Simulation of error terms for SML N*M*S  
+set.seed(8769)
+uim = matrix(rnorm(N*M*S, mean = 0, sd = 1), N*M, S)
+u0m = matrix(rnorm(M*S, mean = 0, sd = 1), M, S) #### %*% matrix(rep(1,N),N,1)
+
+#### Explanatory variables
+
+# Need to sort sml_data by market first
+
+sml_data %>% arrange(market)
+
+pop = sml_data$pop
+City2 = sml_data$City2
+dist = sml_data$dist
+dist2 = dist^2
+income = sml_data$income
+slot = sml_data$slot
+hub = sml_data$hub
+Ncompet = sml_data$nentrants
+Nthreats = sml_data$nentrythreats
+# Nbroutes=(matdata$NbroutDep+matdata$NbroutArr)/2 # AW ?
+
+Y = as.matrix(sml_data$I)
+X = as.matrix(rbind(rep(1,N*M),pop[1:(N*M)],income[1:(N*M)],dist[1:(N*M)],
+                    dist2[1:(N*M)],City2[1:(N*M)],slot[1:(N*M)],hub[1:(N*M)] ))
+matexpl = t(X[,1:(N*M)])
+matN = Ncompet[seq(1,N*M,N)]
+matNT = Nthreats[seq(1,N*M,N)]
+
+mydata=data.frame(cbind(Y,matexpl))
+colnames(mydata)=c("Y","K","pop","income","dist","dist2","City2","slot","hub")
+
+#### Nb var = col(matexpl) + 2 for the correlation of the term
+nvar=ncol(matexpl)+2
+
+####Initial value
+myprobit <- glm(Y~ pop+dist+dist2+income+slot+City2+hub+Ncompet+Nthreats, family = binomial(link = "probit"), 
+                data = mydata)
+
+## model summary
+summary(myprobit)  
+
+coefinit=c(coef(myprobit),1,0)
+
+# How do we set `coef` below?
+# Seems to be initial coefficients (ncol(matexpl)) + guess at delta(?) + (proto)rho(?)
+# where delta is X and rho is Y
+
+#### Procedure to compute N at the equilibrium
+Calc_N<- function(s,matexpl,coef,uim,u0m){
+  Calc_N_m<- function(m,s,matexpl,coef,uim,u0m){
+    
+    #Compute profits : 
+    ind1=(m-1)*N+1
+    rho=(exp(coef[nvar])-exp(-coef[nvar]))/(exp(coef[nvar])+exp(-coef[nvar])) #Reparametrization to get it between -1 and 1
+    profits = matexpl[ind1:(ind1+N-1),]%*%coef[1:(nvar-2)]+rho*rep(u0m[m,s],N)+sqrt(1-rho^2)*uim[ind1:(ind1+N-1),s]
+    
+    #Threshold 
+    delta=coef[nvar-1]
+    threshold=delta*log(seq(1,N,1))
+    
+    ### Neq
+    above<-function(i){sum(profits>threshold[i])}
+    nfirm=sum((sapply(seq(1,N,1),above)-seq(1,N,1))>0)
+    
+    return(c(1*(nfirm==matN[m])))
+  } 
+  return(c(sapply(seq(1,M,1), Calc_N_m,s=s,matexpl=matexpl,coef=coef,uim=uim,u0m=u0m)))
+}
+
+#### Procedure to compute the log-likelihood
+
+loglik<-function(theta){
+  # Compute average number of entrants
+  cl<-makeCluster(Nclust) # Function NPred will be called 100 times parallelly
+  clusterExport(cl=cl, varlist=c("matexpl", "uim", "u0m", "matN","M","N","nvar"))
+  Matrice_N <- rowMeans(data.frame(matrix(unlist(parLapply(cl,1:S,Calc_N,matexpl=matexpl,coef=theta,uim=uim,u0m=u0m)),
+                                          nrow=M, byrow=F)))
+  stopCluster(cl)
+  Matrice_N[Matrice_N==0]=1E-100
+  loglik=-sum(log(Matrice_N))
+  return(loglik)
+}
+
+start_time <- Sys.time()
+loglik(coefinit)
+end_time <- Sys.time()
+end_time - start_time
