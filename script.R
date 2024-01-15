@@ -1,41 +1,17 @@
 
 # Libraries and data ------------------------------------------------------
 
-library(tidyverse)
+library(dplyr)
+library(tidyr)
 library(janitor)
 library(data.table)
+library(stargazer)
 
-# 2016 Data
-df_2016 <- read.table("Data_USA_CB_2016_Q2.txt", sep = ";", header = T)
-
-# 2017 Data
-df_2017 <- read.table("Data_USA_CB_2017_Q2.txt", sep = ";", header = T)
-
-
-# Wrangling ---------------------------------------------------------------
-
-# How many airlines?
-plyr::count(df_2016$AIRLINE) # 12 airlines AA, AS, B6, DL, F9, G4, NH, NK, SY, UA, VX, WN
-plyr::count(df_2017$AIRLINE) # 12 airlines AA, AS, B6, DL, F9, G4, NK, OO, SY, UA, VX, WN
-
-# Different markets between 2016 and 2017
-setdiff(df_2016$MARKET, df_2017$MARKET) # "LVL-MEM", "MEM-STL", "RAL-RIC", "RAL-VIR"
-
-
-# Generate variables ------------------------------------------------------
-
-# city2
-df_2016 <- df_2016 %>%
-  group_by(AIRLINE) %>%
-  mutate(city2 = case_when(VILLE_ARR %in% VILLE_DEP ~ 1, T ~ 0), .after = MARKET)
-
-df_2017 <- left_join(df_2017, select(df_2016, MARKET, AIRLINE, DIRECT, city2),
-                     by = c("MARKET", "AIRLINE", "DIRECT"))
-
-df_2017 <- df_2017 %>% mutate(city2 = case_when(is.na(city2) ~ 0, T ~ city2))
-
-
-# Alec's code -------------------------------------------------------------
+# SML
+library(MASS)
+library(nloptr)
+library(parallel)
+options(digits = 5)
 
 # Data
 data2016 <- read.table("Data_USA_CB_2016_Q2.txt", sep = ";", header = T) %>%
@@ -45,6 +21,39 @@ data2016 <- read.table("Data_USA_CB_2016_Q2.txt", sep = ";", header = T) %>%
 data2017 <- read.table("Data_USA_CB_2017_Q2.txt", sep = ";", header = T) %>%
   clean_names() %>%
   mutate(pax = pax * 10)
+
+
+# Wrangling ---------------------------------------------------------------
+
+# How many airlines?
+plyr::count(data2016$airline) # 12 airlines AA, AS, B6, DL, F9, G4, NK, NH, SY, UA, VX, WN
+plyr::count(data2017$airline) # 12 airlines AA, AS, B6, DL, F9, G4, NK, OO, SY, UA, VX, WN
+
+# Drop NH and OO
+data2016 <- subset(data2016, airline != "NH") # Just one observation, weird
+data2017 <- subset(data2017, airline != "OO") # Just three observations, also weird
+
+# Aggregate low cost airlines as "LC"
+data2016 <- data2016 %>%
+  mutate(airline = case_when(airline == "WN" ~ "LC",
+                             airline == "F9" ~ "LC",
+                             airline == "B6" ~ "LC",
+                             airline == "NK" ~ "LC",
+                             airline == "G4" ~ "LC",
+                             airline == "SY" ~ "LC",
+                             T ~ airline))
+
+data2017 <- data2017 %>%
+  mutate(airline = case_when(airline == "WN" ~ "LC",
+                             airline == "F9" ~ "LC",
+                             airline == "B6" ~ "LC",
+                             airline == "NK" ~ "LC",
+                             airline == "G4" ~ "LC",
+                             airline == "SY" ~ "LC",
+                             T ~ airline))
+
+# Different markets between 2016 and 2017
+setdiff(data2016$market, data2017$market) # "LVL-MEM", "MEM-STL", "RAL-RIC", "RAL-VIR"
 
 
 ## Cleaning ----
@@ -60,7 +69,7 @@ all_airlines17 <- data2017$airline %>% unique()
 direct_markets17 <- data2017 %>%
   filter(direct == 1) %>%
   filter(pax >= 90) %>%
-  select(airline, market) %>%
+  dplyr::select(airline, market) %>%
   mutate(id = paste(airline, market, sep = "-")) %>%
   pull(id)
 
@@ -101,7 +110,7 @@ airlinesXmkts17 <- airlinesXmkts17 %>%
 # (3a) Construct list of endpoints in which airlines operated
 airlinesXcities16 <- data2016 %>%
   filter(pax >= 90) %>%
-  select(airline, ville_dep, ville_arr) %>%
+  dplyr::select(airline, ville_dep, ville_arr) %>%
   mutate(id1 = paste(airline, ville_dep, sep = "-"),
          id2 = paste(airline, ville_arr, sep = "-"))
 airlinesXcities16 <- c(airlinesXcities16$id1, airlinesXcities16$id2) %>% unique()
@@ -127,6 +136,7 @@ pot_entrants <- airlinesXmkts17 %>%
   mutate(perc_entry = entry / no)
 
 data.table(pot_entrants)
+stargazer(data.table(pot_entrants), summary = F, rownames = F) # Latex table
 # Results closely match those from paper: 100% City 0 enter; 0.25% of City 1 enter; 27.5% of City 2 enter.
 # (Compare to 100%, 0.84%, 22.13% from 2007 data in the paper)
 
@@ -147,18 +157,18 @@ agg_entrants <- airlinesXmkts17 %>%
 # (4) Put all data together for final entry model dataset
 
 # (4a) Append agg entrants info
-entry_data <- left_join(airlinesXmkts17, agg_entrants, by="market")
+entry_data <- left_join(airlinesXmkts17, agg_entrants, by = "market")
 
 # (4b) Add market characteristics and city characteristics
 direct_dist <- bind_rows(data2016, data2017) %>%
-  select(market, direct_distance) %>%
+  dplyr::select(market, direct_distance) %>%
   group_by(market) %>%
   filter(direct_distance == min(direct_distance)) %>%
   distinct()
 entry_data <- left_join(entry_data, direct_dist, by="market")
 missing_dist <- entry_data %>%
   filter(is.na(direct_distance)) %>%
-  select(market) %>%
+  dplyr::select(market) %>%
   distinct()
 # 17 markets for which no airlines fly direct and thus missing direct distance.
 # All are between airports generally close together (about <2 hrs driving)
@@ -185,12 +195,179 @@ entry_data <- entry_data %>%
                                      T ~ direct_distance))
 
 dep_chars <- data2017 %>%
-  select(ville_dep, popdep, gdpdep, gdppercapdep) %>%
+  dplyr::select(ville_dep, popdep, gdpdep, gdppercapdep) %>%
   distinct()
 
 arr_chars <- data2017 %>%
-  select(ville_arr, poparr, gdparr, gdppercaparr) %>%
+  dplyr::select(ville_arr, poparr, gdparr, gdppercaparr) %>%
   distinct()
 
 entry_data <- left_join(entry_data, dep_chars, by = c("end1" = "ville_dep"))
 entry_data <- left_join(entry_data, arr_chars, by = c("end2" = "ville_arr"))
+
+
+# Write to csv ------------------------------------------------------------
+
+write.csv(entry_data, "entry_data.csv", row.names = F)
+write.csv(entry_data, "entry_data.csv", row.names = F)
+
+
+# SML Procedure -----------------------------------------------------------
+
+# Add pop and income product vars for SML
+sml_data <- entry_data %>%
+  mutate(pop = popdep / 1e14 * poparr,
+         income = gdppercapdep * gdppercaparr / 1e4,
+         dist = direct_distance / 1e4,
+         dist2 = dist ^ 2,
+         slot = as.numeric(Slot_dummy),
+         City1 = as.numeric(City1),
+         City2 = as.numeric(City2),
+         hub = as.numeric(HUB_dummy),
+         I = as.numeric(incumbent),
+         pot_entrant = as.numeric(pot_entrant)) %>%
+  dplyr::select(-end1, -end2, -end1_id, -end2_id, -presence_end1_16, -presence_end2_16,
+         -presence_any_16, -direct_distance, -popdep, -gdpdep, -gdppercapdep,
+         -poparr, -gdparr, -gdppercaparr)
+
+# Table 3
+summary(sml_data) # Note: I think authors might not be including missing markets?
+
+# Table 3 price summary
+data2017 %>%
+  group_by(market) %>%
+  summarize(price50 = median(price),
+            price25 = quantile(price, probs = 0.25),
+            price75 = quantile(price, probs = 0.75)) %>%
+  summary()
+
+## Numbers much higher than 2007, inflation expected but seems to go beyond...?
+## Could it also be that we have ROUND TRIP PRICE rather than one-way?
+
+# You need to create the variables City2, Nentrythreats, Hub and
+# Slot. Because markets are non directional, you need to slightly adapt some of
+# the deﬁnitions used in Gayle and Wu. For example, you may modify Nentrythreats
+# and consider only competitors which are present at BOTH endpoints (the year
+# before). Alternatively, you can build TWO variables, the number of competitors
+# present at both end points and the number of competitors present at only one
+# end-point. Don’t forget to add the ”non-existent” markets, i.e. those for
+# which no airline proposes a direct ﬂight. Suggest a descriptive analysis, i.e.
+# tables 1 to 3 of Gayle and Wu (2013). Note that I only ask you to consider the
+# average price in a given market.
+
+# Below copy/pasted from SML procedure code provided by C. Bontemps
+
+# Number of markets
+M = 1176
+
+# Number of players (airlines)
+N = 6
+
+# Number of Simulations (starting small)
+S = 100
+
+# Number of cluster to make it in parallel
+Nclust = 8
+
+# Simulation of error terms for SML N * M * S ----
+set.seed(8769)
+uim = matrix(rnorm(N * M * S, mean = 0, sd = 1), N * M, S)
+u0m = matrix(rnorm(M * S, mean = 0, sd = 1), M, S) # %*% matrix(rep(1, N), N, 1)
+
+
+## Explanatory variables ----
+
+# Need to sort sml_data by market first
+
+sml_data <- sml_data %>% arrange(market)
+
+pop = sml_data$pop
+City2 = sml_data$City2
+dist = sml_data$dist
+dist2 = dist ^ 2
+income = sml_data$income
+slot = sml_data$slot
+hub = sml_data$hub
+Ncompet = sml_data$nentrants
+Nthreats = sml_data$nentrythreats
+# Nbroutes = (matdata$NbroutDep + matdata$NbroutArr) / 2 # AW ?
+
+Y = as.matrix(sml_data$I)
+X = as.matrix(rbind(rep(1, N * M), pop[1:(N * M)], income[1:(N * M)], dist[1:(N * M)],
+                    dist2[1:(N * M)], City2[1:(N * M)], slot[1:(N * M)], hub[1:(N * M)]))
+matexpl = t(X[, 1:(N * M)])
+matN = Ncompet[seq(1, N * M, N)]
+matNT = Nthreats[seq(1, N * M, N)]
+
+mydata = data.frame(cbind(Y, matexpl))
+colnames(mydata) = c("Y", "K", "pop", "income", "dist", "dist2", "City2", "slot",
+                     "hub")
+
+# Nb var = col(matexpl) + 2 for the correlation of the term
+nvar = ncol(matexpl) + 2
+
+# Initial value
+myprobit <- glm(Y ~ pop + dist + dist2 + income + slot + City2 + hub + Ncompet +
+                  Nthreats, family = binomial(link = "probit"), data = mydata)
+
+# Model summary
+summary(myprobit)
+coefinit = c(coef(myprobit), 1, 0)
+
+# How do we set 'coef' below?
+# Seems to be initial coefficients (ncol(matexpl)) + guess at delta(?) + (proto)rho(?)
+# where delta is X and rho is Y
+
+# Procedure to compute N at the equilibrium
+Calc_N <- function(s, matexpl, coef, uim, u0m) {
+  Calc_N_m <- function(m, s, matexpl, coef, uim, u0m) {
+
+    # Compute profits :
+    ind1 = (m - 1) * N + 1
+    rho = (exp(coef[nvar]) - exp(-coef[nvar])) / (exp(coef[nvar]) + exp(-coef[nvar])) # Reparametrization to get it between -1 and 1
+    profits = matexpl[ind1:(ind1 + N - 1), ] %*% coef[1:(nvar - 2)] + rho * rep(u0m[m, s], N) + sqrt(1 - rho ^ 2) * uim[ind1:(ind1 + N - 1), s]
+
+    # Threshold
+    delta = coef[nvar - 1]
+    threshold = delta * log(seq(1, N, 1))
+
+    ### Neq
+    above <- function(i){sum(profits > threshold[i])}
+    nfirm = sum((sapply(seq(1, N, 1), above) - seq(1, N, 1)) > 0)
+
+    return(c(1 * (nfirm == matN[m])))
+  }
+  return(c(sapply(seq(1, M, 1), Calc_N_m, s = s, matexpl = matexpl, coef = coef, uim = uim, u0m = u0m)))
+}
+
+# Procedure to compute the log-likelihood
+
+loglik <- function(theta){
+
+  # Compute average number of entrants
+  cl <- makeCluster(Nclust) # Function NPred will be called 100 times parallelly
+  clusterExport(cl = cl, varlist = c("matexpl", "uim", "u0m", "matN", "M", "N", "nvar"))
+  Matrice_N <- rowMeans(data.frame(matrix(unlist(parLapply(cl, 1:S, Calc_N, matexpl = matexpl,
+                                                           coef = theta, uim = uim,
+                                                           u0m = u0m)),
+                                          nrow = M, byrow = F)))
+  stopCluster(cl)
+  Matrice_N[Matrice_N == 0] = 1E-100
+  loglik = -sum(log(Matrice_N))
+  return(loglik)
+}
+
+
+# SML ---------------------------------------------------------------------
+
+optim(coefinit, loglik, control = list(trace = T, maxit = 100, REPORT = 1),
+      method = "BFGS")
+
+###Use of nloptr for optimizing (there are other routines)
+require(optimx)
+theta_init= ?????
+
+  LL(theta_init)
+opts <-list("algorithm"="NLOPT_LN_COBYLA","xtol_rel"=1.0e-4,maxeval=10000,"print_level"=2)
+res<-nloptr(x0=theta_init,eval_f=LL,opts=opts)
+print(res)
