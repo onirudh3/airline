@@ -36,7 +36,7 @@ popdata <- read.csv(paste0(projdir, "pop_msa_2010-2022.csv"), sep=";") %>% clean
 #------------------------- Initial Data Exploration -------------------------#
 
 unique(data2016$airline) # 12 airlines
-unique(data2017$airline) # still 12 airlines, but NH (Nippon) replaced with OO (SkyWest)
+unique(data2017$airline) # still 12 airlines, but NH (Nippon) replaced with OO (SkyWest) --> will drop
 
 # AA = American Airlines
 # UA = United Airlines
@@ -51,14 +51,16 @@ unique(data2017$airline) # still 12 airlines, but NH (Nippon) replaced with OO (
 # SY = Sun Country Airlines
 # OO = SkyWest Airlines
 
-# AW: should definitely address the change above, possibly by dropping or collapsing some airlines?
+# Could collapse LCC per Wiki: Allegiant, Frontier, JetBlue, Southwest, Spirit, Sun Country, Virgin
+# May want to separate out Southwest as Ciliberto & Tamer.
+
 # Per CB: "You may want to limit the number of airlines and aggregate some into a 
 # ﬁctitious airline. Propose solutions (see for example Ciliberto and Tamer, Eca 2009)."
 
 n_distinct(data2016$market) # 1159 markets in '16
 n_distinct(data2017$market) # 1155 markets in '17
 
-#------------------------------ Da"ta Cleaning -------------------------------#
+#------------------------------ Data Cleaning -------------------------------#
 #
 # Goal: Dataset at market-level with # of potential entrants + # of actual entrants + market chars
 
@@ -66,12 +68,38 @@ n_distinct(data2017$market) # 1155 markets in '17
 
 # (1a) Get lists of all cities, all airlines, all markets served directly
 
+# Drop Nippon & SkyWest + aggregate LCC
+
+data2016 <- data2016 %>% filter(airline != "NH")
+data2017 <- data2017 %>% filter(airline != "OO")
+
+# If we want to collapse airlines:
+# data2016 <- data2016 %>% 
+#   mutate(airline = case_when(airline %in% c("WN", "F9", "B6", "NK", "G4", "VX", "SY") ~ "LCC",
+#                              TRUE ~ airline)) %>% 
+#   group_by(airline, market, ville_dep, ville_arr, popdep, poparr, gdpdep, gdparr, 
+#            gdppercapdep, gdppercaparr) %>% 
+#   summarize(direct = max(direct),
+#             direct_distance = min(direct_distance),
+#             pax = mean(pax),
+#             price = mean(price))
+# 
+# data2017 <- data2017 %>% 
+#   mutate(airline = case_when(airline %in% c("WN", "F9", "B6", "NK", "G4", "VX", "SY") ~ "LCC",
+#                              TRUE ~ airline)) %>% 
+#   group_by(airline, market, ville_dep, ville_arr, popdep, poparr, gdpdep, gdparr, 
+#            gdppercapdep, gdppercaparr) %>% 
+#   summarize(direct = max(direct),
+#             direct_distance = min(direct_distance),
+#             pax = mean(pax),
+#             price = mean(price))
+
 all_cities17 <- c(data2017$ville_dep, data2017$ville_arr) %>% unique()
 all_airlines17 <- data2017$airline %>% unique()
 
 direct_markets17 <- data2017 %>% 
   filter(direct==1) %>% 
-  filter(pax >= 90) %>% 
+  filter(pax >= 90) %>% #AW: could see what happens if get rid of this criterion
   select(airline, market) %>% 
   mutate(id = paste(airline, market, sep="-")) %>% 
   pull(id)
@@ -102,25 +130,36 @@ airlinesXmkts17 <- airlinesXmkts17 %>%
 
 # (2) Add Hub airports: https://en.wikipedia.org/wiki/List_of_hub_airports#United_States
 # and slot airports
+# FOR HUBS: have added "Focus cities" since LCCs mostly don't have hubs
 
 hubs <- c("AS-LAX", "AS-SFO", "AS-POR", "AS-SEA", 
           "AA-PHX", "AA-LAX", "AA-MIA", "AA-CHI", "AA-NYC", "AA-CHA", "AA-PHI", "AA-DAL", "AA-WSH",
-          "DL-LAX", "DL-ATL", "DL-BOS", "DL-DET", "DL-MIN", "DL-NYC", "DL-SLC", "DL-SEA", "DL-CIN", # Delta had Cincinnatti hub until 2020 
-          "F9-DNV", 
-          "SY-MIN",
-          "UA-LAX", "UA-SFO", "UA-DNV", "UA-CHI", "UA-NYC", "UA-HOU", "UA-WSH")
+          "DL-LAX", "DL-ATL", "DL-BOS", "DL-DET", "DL-MIN", "DL-NYC", "DL-SLC", "DL-SEA", "DL-CIN",  # Delta had Cincinnati hub until 2020 
+          "F9-DNV",
+          "SY-MIN", 
+          "UA-LAX", "UA-SFO", "UA-DNV", "UA-CHI", "UA-NYC", "UA-HOU", "UA-WSH",
+          "LCC-DNV", "LCC-MIN")
+
+focus <- c("G4-PHX", "G4-LAX", "G4-MIA", "G4-TMP", "G4-IND", "G4-CIN", "G4-GRK", "G4-VEG", "G4-PIT", "G4-NSH", "G4-AUS", 
+           "AS-SDG",
+           "DL-RAL",
+           "F9-PHX", "F9-MIA", "F9-ORL", "F9-TMP", "F9-ATL", "F9-CHI", "F9-VEG", "F9-CLE", "F9-PHL",
+           "B6-LAX", "B6-MIA", "B6-ORL", "B6-BOS", "B6-NYC",
+           "WN-PHX", "WN-LAX", "WN-SFO", "WN-DNV", "WN-ORL", "WN-ATL", "WN-CHI", "WN-WSH", "WN-VEG", "WN-DAL", "WN-HOU",
+           "SY-VEG", "SY-DAL",
+           "NK-MIA", "NK-ORL", "NK-ATL", "NK-CHI", "NK-DET", "NK-VEG", "NK-DAL")
 
 slots <- c("NYC", "CHI", "WSH") # Market-level, so using cities rather than airports
 
 airlinesXmkts17 <- airlinesXmkts17 %>% 
-  mutate(HUB_dummy = (end1_id %in% hubs | end2_id %in% hubs),
+  mutate(HUB_dummy = (end1_id %in% hubs | end2_id %in% hubs), # | end1_id %in% focus | end2_id %in% focus),
          Slot_dummy = (end1 %in% slots | end2 %in% slots))
 
 # (3) Define entry threats based on airline operations in 2016
 
 # (3a) Construct list of endpoints in which airlines operated 
 airlinesXcities16 <- data2016 %>% 
-  filter(pax >= 90) %>% 
+  filter(pax >= 90) %>%
   select(airline, ville_dep, ville_arr) %>% 
   mutate(id1 = paste(airline, ville_dep, sep="-"),
          id2 = paste(airline, ville_arr, sep="-"))
@@ -171,7 +210,8 @@ entry_data <- left_join(airlinesXmkts17, agg_entrants, by="market")
 
 # (4b) Add market characteristics and city characteristics
 
-direct_dist <- bind_rows(data2016, data2017) %>% 
+direct_dist <- bind_rows(data2016, data2017) %>%
+  ungroup() %>% 
   select(market, direct_distance) %>% 
   group_by(market) %>% 
   filter(direct_distance == min(direct_distance)) %>% 
@@ -189,30 +229,34 @@ missing_dist <- entry_data %>%
 # Will use https://www.airmilescalculator.com/distance/aus-to-bhm/ to fill these in manually
 
 entry_data <- entry_data %>% 
-  mutate(direct_distance = case_when(market == "AUS-SAT" ~ 66,
-                                     market == "BOS-HRT" ~ 91,
-                                     market == "BUF-PIT" ~ 186,
-                                     market == "BUF-ROC" ~ 55,
-                                     market == "CIN-COL" ~ 115,
-                                     market == "CIN-IND" ~ 99,
-                                     market == "CIN-LVL" ~ 84,
-                                     market == "CLE-PIT" ~ 106,
-                                     market == "COL-LVL" ~ 198,
-                                     market == "COL-PIT" ~ 145,
-                                     market == "IND-LVL" ~ 111,
-                                     market == "JCK-ORL" ~ 144,
-                                     market == "JCK-TMP" ~ 181,
-                                     market == "LVL-NSH" ~ 151,
-                                     market == "MEM-NSH" ~ 200,
-                                     market == "ORL-TMP" ~ 81,
-                                     market == "RIC-VIR" ~ 75,
-                                     TRUE ~ direct_distance))
+  filter(!is.na(direct_distance))
+  
+  # mutate(direct_distance = case_when(market == "AUS-SAT" ~ 66,
+  #                                    market == "BOS-HRT" ~ 91,
+  #                                    market == "BUF-PIT" ~ 186,
+  #                                    market == "BUF-ROC" ~ 55,
+  #                                    market == "CIN-COL" ~ 115,
+  #                                    market == "CIN-IND" ~ 99,
+  #                                    market == "CIN-LVL" ~ 84,
+  #                                    market == "CLE-PIT" ~ 106,
+  #                                    market == "COL-LVL" ~ 198,
+  #                                    market == "COL-PIT" ~ 145,
+  #                                    market == "IND-LVL" ~ 111,
+  #                                    market == "JCK-ORL" ~ 144,
+  #                                    market == "JCK-TMP" ~ 181,
+  #                                    market == "LVL-NSH" ~ 151,
+  #                                    market == "MEM-NSH" ~ 200,
+  #                                    market == "ORL-TMP" ~ 81,
+  #                                    market == "RIC-VIR" ~ 75,
+  #                                    TRUE ~ direct_distance)) # COnsider dropping these
   
 dep_chars <- data2017 %>% 
+  ungroup() %>% 
   select(ville_dep, popdep, gdpdep, gdppercapdep) %>% 
   distinct()
 
 arr_chars <- data2017 %>% 
+  ungroup() %>% 
   select(ville_arr, poparr, gdparr, gdppercaparr) %>% 
   distinct()
 
@@ -221,6 +265,7 @@ entry_data <- left_join(entry_data, arr_chars, by = c("end2" = "ville_arr"))
 
 # Add pop and income product vars for SML
 sml_data <- entry_data %>% 
+  # filter(nentrants > 0) %>% 
   mutate(pop = popdep/1e14 * poparr,
          income = gdppercapdep*gdppercaparr/1e4,
          dist = direct_distance/1e4,
@@ -237,7 +282,7 @@ sml_data <- entry_data %>%
 
 # Table 3
 
-summary(sml_data) # Note: I think authors might not be including missing markets?
+summary(sml_data)
 
 # Table 3 price summary
 data2017 %>% group_by(market) %>% summarize(price50 = median(price),
@@ -248,123 +293,5 @@ data2017 %>% group_by(market) %>% summarize(price50 = median(price),
 ## Numbers much higher than 2007, inflation expected but seems to go beyond...?
 ## Could it also be that we have ROUND TRIP PRICE rather than one-way?
 
-# You need to create the variables City2, Nentrythreats, Hub and 
-# Slot. Because markets are non directional, you need to slightly adapt some of 
-# the deﬁnitions used in Gayle and Wu. For example, you may modify Nentrythreats 
-# and consider only competitors which are present at BOTH endpoints (the year 
-# before). Alternatively, you can build TWO variables, the number of competitors 
-# present at both end points and the number of competitors present at only one 
-# end-point. Don’t forget to add the ”non-existent” markets, i.e. those for 
-# which no airline proposes a direct ﬂight. Suggest a descriptive analysis, i.e. 
-# tables 1 to 3 of Gayle and Wu (2013). Note that I only ask you to consider the 
-# average price in a given market.
-
-#------------------------------ SML Procedure -------------------------------#
-# Below copy/pasted from SML procedure code provided by C. Bontemps
-
-# Number of markets
-M=1176
-# Number of players (airlines)
-N=12
-#Number of Simulations (starting small)
-S=1000
-
-#Number of cluster to make it in parallel
-Nclust=8
-
-####Libraries
-library(MASS)
-library(data.table)
-library(nloptr)
-library(parallel)
-library(dplyr)
-options(digits = 5)
-
-##### Simulation of error terms for SML N*M*S  
-set.seed(8769)
-uim = matrix(rnorm(N*M*S, mean = 0, sd = 1), N*M, S)
-u0m = matrix(rnorm(M*S, mean = 0, sd = 1), M, S) #### %*% matrix(rep(1,N),N,1)
-
-#### Explanatory variables
-
-# Need to sort sml_data by market first
-
-sml_data %>% arrange(market)
-
-pop = sml_data$pop
-City2 = sml_data$City2
-dist = sml_data$dist
-dist2 = dist^2
-income = sml_data$income
-slot = sml_data$slot
-hub = sml_data$hub
-Ncompet = sml_data$nentrants
-Nthreats = sml_data$nentrythreats
-# Nbroutes=(matdata$NbroutDep+matdata$NbroutArr)/2 # AW ?
-
-Y = as.matrix(sml_data$I)
-X = as.matrix(rbind(rep(1,N*M),pop[1:(N*M)],income[1:(N*M)],dist[1:(N*M)],
-                    dist2[1:(N*M)],City2[1:(N*M)],slot[1:(N*M)],hub[1:(N*M)] ))
-matexpl = t(X[,1:(N*M)])
-matN = Ncompet[seq(1,N*M,N)]
-matNT = Nthreats[seq(1,N*M,N)]
-
-mydata=data.frame(cbind(Y,matexpl))
-colnames(mydata)=c("Y","K","pop","income","dist","dist2","City2","slot","hub")
-
-#### Nb var = col(matexpl) + 2 for the correlation of the term
-nvar=ncol(matexpl)+2
-
-####Initial value
-myprobit <- glm(Y~ pop+dist+dist2+income+slot+City2+hub+Ncompet+Nthreats, family = binomial(link = "probit"), 
-                data = mydata)
-
-## model summary
-summary(myprobit)  
-
-coefinit=c(coef(myprobit),1,0)
-
-# How do we set `coef` below?
-# Seems to be initial coefficients (ncol(matexpl)) + guess at delta(?) + (proto)rho(?)
-# where delta is X and rho is Y
-
-#### Procedure to compute N at the equilibrium
-Calc_N<- function(s,matexpl,coef,uim,u0m){
-  Calc_N_m<- function(m,s,matexpl,coef,uim,u0m){
-    
-    #Compute profits : 
-    ind1=(m-1)*N+1
-    rho=(exp(coef[nvar])-exp(-coef[nvar]))/(exp(coef[nvar])+exp(-coef[nvar])) #Reparametrization to get it between -1 and 1
-    profits = matexpl[ind1:(ind1+N-1),]%*%coef[1:(nvar-2)]+rho*rep(u0m[m,s],N)+sqrt(1-rho^2)*uim[ind1:(ind1+N-1),s]
-    
-    #Threshold 
-    delta=coef[nvar-1]
-    threshold=delta*log(seq(1,N,1))
-    
-    ### Neq
-    above<-function(i){sum(profits>threshold[i])}
-    nfirm=sum((sapply(seq(1,N,1),above)-seq(1,N,1))>0)
-    
-    return(c(1*(nfirm==matN[m])))
-  } 
-  return(c(sapply(seq(1,M,1), Calc_N_m,s=s,matexpl=matexpl,coef=coef,uim=uim,u0m=u0m)))
-}
-
-#### Procedure to compute the log-likelihood
-
-loglik<-function(theta){
-  # Compute average number of entrants
-  cl<-makeCluster(Nclust) # Function NPred will be called 100 times parallelly
-  clusterExport(cl=cl, varlist=c("matexpl", "uim", "u0m", "matN","M","N","nvar"))
-  Matrice_N <- rowMeans(data.frame(matrix(unlist(parLapply(cl,1:S,Calc_N,matexpl=matexpl,coef=theta,uim=uim,u0m=u0m)),
-                                          nrow=M, byrow=F)))
-  stopCluster(cl)
-  Matrice_N[Matrice_N==0]=1E-100
-  loglik=-sum(log(Matrice_N))
-  return(loglik)
-}
-
-start_time <- Sys.time()
-loglik(coefinit)
-end_time <- Sys.time()
-end_time - start_time
+# Save Data
+saveRDS(sml_data, paste0(projdir, "sml_data.rds"))
