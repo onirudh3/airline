@@ -11,6 +11,7 @@ library(stargazer)
 library(MASS)
 library(nloptr)
 library(parallel)
+library(optimx)
 options(digits = 5)
 
 # Data
@@ -33,24 +34,20 @@ plyr::count(data2017$airline) # 12 airlines AA, AS, B6, DL, F9, G4, NK, OO, SY, 
 data2016 <- subset(data2016, airline != "NH") # Just one observation, weird
 data2017 <- subset(data2017, airline != "OO") # Just three observations, also weird
 
-# Aggregate low cost airlines as "LC"
-data2016 <- data2016 %>%
-  mutate(airline = case_when(airline == "WN" ~ "LC",
-                             airline == "F9" ~ "LC",
-                             airline == "B6" ~ "LC",
-                             airline == "NK" ~ "LC",
-                             airline == "G4" ~ "LC",
-                             airline == "SY" ~ "LC",
-                             T ~ airline))
+# Aggregate low cost airlines as "LCC"
+# data2016 <- data2016 %>%
+#   mutate(airline = case_when(airline %in% c("WN", "F9", "B6", "NK", "G4", "VX", "SY") ~ "LCC",
+#                              T ~ airline))
+#
+# data2017 <- data2017 %>%
+#   mutate(airline = case_when(airline %in% c("WN", "F9", "B6", "NK", "G4", "VX", "SY") ~ "LCC",
+#                              T ~ airline))
 
-data2017 <- data2017 %>%
-  mutate(airline = case_when(airline == "WN" ~ "LC",
-                             airline == "F9" ~ "LC",
-                             airline == "B6" ~ "LC",
-                             airline == "NK" ~ "LC",
-                             airline == "G4" ~ "LC",
-                             airline == "SY" ~ "LC",
-                             T ~ airline))
+# Table 1: Airlines represented in 2017
+data2017 %>%
+  subset(direct == 1) %>%
+  group_by(airline) %>%
+  summarise("No. of markets served" = n())
 
 # Different markets between 2016 and 2017
 setdiff(data2016$market, data2017$market) # "LVL-MEM", "MEM-STL", "RAL-RIC", "RAL-VIR"
@@ -170,29 +167,11 @@ missing_dist <- entry_data %>%
   filter(is.na(direct_distance)) %>%
   dplyr::select(market) %>%
   distinct()
-# 17 markets for which no airlines fly direct and thus missing direct distance.
-# All are between airports generally close together (about <2 hrs driving)
-# Will use https://www.airmilescalculator.com/distance/aus-to-bhm/ to fill these in manually
 
-entry_data <- entry_data %>%
-  mutate(direct_distance = case_when(market == "AUS-SAT" ~ 66,
-                                     market == "BOS-HRT" ~ 91,
-                                     market == "BUF-PIT" ~ 186,
-                                     market == "BUF-ROC" ~ 55,
-                                     market == "CIN-COL" ~ 115,
-                                     market == "CIN-IND" ~ 99,
-                                     market == "CIN-LVL" ~ 84,
-                                     market == "CLE-PIT" ~ 106,
-                                     market == "COL-LVL" ~ 198,
-                                     market == "COL-PIT" ~ 145,
-                                     market == "IND-LVL" ~ 111,
-                                     market == "JCK-ORL" ~ 144,
-                                     market == "JCK-TMP" ~ 181,
-                                     market == "LVL-NSH" ~ 151,
-                                     market == "MEM-NSH" ~ 200,
-                                     market == "ORL-TMP" ~ 81,
-                                     market == "RIC-VIR" ~ 75,
-                                     T ~ direct_distance))
+# 17 markets for which no airlines fly direct and thus missing direct distance
+# All are between airports generally close together (about <2 hrs driving)
+# We will delete these
+entry_data <- subset(entry_data, !is.na(direct_distance)) # 1159 markets left
 
 dep_chars <- data2017 %>%
   dplyr::select(ville_dep, popdep, gdpdep, gdppercapdep) %>%
@@ -208,7 +187,6 @@ entry_data <- left_join(entry_data, arr_chars, by = c("end2" = "ville_arr"))
 
 # Write to csv ------------------------------------------------------------
 
-write.csv(entry_data, "entry_data.csv", row.names = F)
 write.csv(entry_data, "entry_data.csv", row.names = F)
 
 
@@ -258,7 +236,7 @@ data2017 %>%
 # Below copy/pasted from SML procedure code provided by C. Bontemps
 
 # Number of markets
-M = 1176
+M = 1159
 
 # Number of players (airlines)
 N = 6
@@ -360,14 +338,11 @@ loglik <- function(theta){
 
 # SML ---------------------------------------------------------------------
 
-optim(coefinit, loglik, control = list(trace = T, maxit = 100, REPORT = 1),
-      method = "BFGS")
+# optim(coefinit, loglik, control = list(trace = T, maxit = 100, REPORT = 1),
+#       method = "BFGS")
 
-###Use of nloptr for optimizing (there are other routines)
-require(optimx)
-theta_init= ?????
-
-  LL(theta_init)
-opts <-list("algorithm"="NLOPT_LN_COBYLA","xtol_rel"=1.0e-4,maxeval=10000,"print_level"=2)
-res<-nloptr(x0=theta_init,eval_f=LL,opts=opts)
+# Use of nloptr for optimizing (there are other routines)
+opts <- list("algorithm" = "NLOPT_LN_COBYLA", "xtol_rel" = 1.0e-4, maxeval = 10000,
+             "print_level" = 2)
+res <- nloptr(x0 = theta_init, eval_f = LL, opts = opts)
 print(res)
