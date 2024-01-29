@@ -39,10 +39,10 @@ M = n_distinct(sml_data$market)
 # Number of airlines
 N = n_distinct(sml_data$airline)
 #Number of Simulations (starting small)
-S=100
+S=1000
 
 #Number of cluster to make it in parallel
-Nclust = 6
+Nclust = 8
 
 #### Explanatory variables
 
@@ -54,12 +54,12 @@ pop = sml_data$pop
 City1 = sml_data$City1
 City2 = sml_data$City2
 dist = sml_data$dist
-dist2 = sml_data$dist2/1000
+dist2 = sml_data$dist2
 income = sml_data$income
 slot = sml_data$slot
 hub = sml_data$hub
 Ncompet = sml_data$nentrants
-Nthreats = sml_data$nentrythreats
+Nthreats = log(sml_data$nentrythreats + 1) # Add 1 because 1 entry threat should have > 0 effect
 
 Y = as.matrix(sml_data$I)
 X = as.matrix(rbind(rep(1,N*M),pop[1:(N*M)],income[1:(N*M)],dist[1:(N*M)],
@@ -101,8 +101,8 @@ nvar=ncol(matexpl)+2
 # summary(BR_model)  ## This is obviously wrong. 
 
 ####Initial value
-myprobit <- polr(as.factor(Y)~ pop+income+dist+dist2+City2+slot+hub+Nthreats, method = "probit", 
-                data = mydata)
+# myprobit <- polr(as.factor(Y)~ pop+income+dist+dist2+City2+slot+hub+Nthreats, method = "probit", 
+#                 data = mydata)
 
 myprobit <- glm(Y ~ pop+income+dist+dist2+City2+slot+hub+Nthreats, family = binomial(link = "probit"), 
                  data = mydata)
@@ -120,11 +120,10 @@ coefinit=c(coef(myprobit),1.8, 0.5)
 #coefinit=c(-3,4, 2.5, 2,-8, 3.3,-0.5,0.05,1.5,0.5)
 
 
-
 ##### Simulation of error terms for SML N*M*S  
 set.seed(31497)
 uim = matrix(rnorm(N*M*S, mean = 0, sd = 1), N*M, S)
-u0m = matrix(rnorm(M*S, mean = 0, sd = 1), M, S) #### %*% matrix(rep(1,N),N,1)
+u0m = matrix(rnorm(M*S, mean = 0, sd = 1), M, S)
 
 #### Procedure to calculate predicted N in each market
 Calc_N<- function(s,matexpl,coef,uim,u0m){
@@ -171,7 +170,7 @@ end_time <- Sys.time()
 end_time - start_time
 # S=100 -> 5.4 secs (-> 100 iterations =  10 mins) -> 33 to finish
 # S=500 -> 40 seconds (-> 100 iterations = 66 mins)
-# S=1000 -> 84 secs (-> 100 iterations = 140 mins = 2.5 hrs)
+# S=1000 -> 53 secs (-> 100 iterations = 140 mins = 2.5 hrs) --> 11.5 hours!! to finish (569 iterations)
 
 start_time <- Sys.time()
 ml.res = nloptr(coefinit,loglik,opts=list("algorithm"="NLOPT_LN_COBYLA",print_level=1,"xtol_rel"=1.0e-4,maxeval=1000))
