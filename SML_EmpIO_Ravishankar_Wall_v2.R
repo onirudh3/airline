@@ -47,7 +47,7 @@ Nclust = 8
 #### Explanatory variables
 
 # Need to sort sml_data by market first
-sml_data <- sml_data %>% arrange(market)
+sml_data <- sml_data %>% arrange(market) 
 
 market = sml_data$market
 pop = sml_data$pop
@@ -59,66 +59,32 @@ income = sml_data$income
 slot = sml_data$slot
 hub = sml_data$hub
 Ncompet = sml_data$nentrants
-Nthreats = log(sml_data$nentrythreats + 1) # Add 1 because 1 entry threat should have > 0 effect
+Nthreats = sml_data$nentrythreats 
 
 Y = as.matrix(sml_data$I)
 X = as.matrix(rbind(rep(1,N*M),pop[1:(N*M)],income[1:(N*M)],dist[1:(N*M)],
-                    dist2[1:(N*M)], City2[1:(N*M)],slot[1:(N*M)],hub[1:(N*M)], 
-                    Nthreats[1:(N*M)]))
+                    dist2[1:(N*M)], City2[1:(N*M)],slot[1:(N*M)],hub[1:(N*M)]))
 matexpl = t(X[,1:(N*M)])
+
+matthreats=Nthreats[seq(1,N*M,N)]
 matN=Ncompet[seq(1,N*M,N)]
 
-mydata=data.frame(cbind(Y,matexpl))
-colnames(mydata)=c("Y","const","pop","income","dist","dist2", "City2","slot","hub",
-                   "Nthreats")
+mydata=data.frame(cbind(Y,matexpl,lmatthreats,lmatN, matN))
+colnames(mydata)=c("Y","const","pop","income","dist","dist2", "City2","slot","hub")
 
-#### Nb var = col(matexpl) + 2 for the correlation of the term - 1 (market identifier)
-nvar=ncol(matexpl)+2
+#### Nb var = col(matexpl) + 3 for the threat and entry coefs and rho correlation of the terms
+nvar=ncol(matexpl)+3
 
-#### Initial value from Bresnahan & Reiss Model
 
-# First estimate a linear model at airline-market level
-
-# first_stage <- lm(Y~pop+income+dist+dist2+City2+slot+hub+Nthreats, data=mydata)
-# mydata$const <- predict(first_stage, new_data = mydata)
-
-# Collapse to market-level
-
-# mydata <- data.frame(market, mydata)
-# 
-# mydata <- mydata %>% 
-#   group_by(market) %>% 
-#   summarize(Y = mean(Y),
-#             const = mean(const)) %>% 
-#   mutate(ln_Y = ifelse(Y ==0, 0, log(Y)),
-#          Y = as.factor(Y)) %>% 
-#   select(Y, const, ln_Y)
-# 
-# BR_model <- clm(Y ~ const + ln_Y , link = "probit", 
-#                 data = mydata) # Can't get this to run...?
-
-## model summary
-# summary(BR_model)  ## This is obviously wrong. 
-
-####Initial value
-# myprobit <- polr(as.factor(Y)~ pop+income+dist+dist2+City2+slot+hub+Nthreats, method = "probit", 
-#                 data = mydata)
-
-myprobit <- glm(Y ~ pop+income+dist+dist2+City2+slot+hub+Nthreats, family = binomial(link = "probit"), 
+## Initial values
+myprobit <- glm(Y ~ pop+income+dist+dist2+City2+slot+hub, family = binomial(link = "probit"), 
                  data = mydata)
 
 ## model summary
 summary(myprobit)  
 
-coefinit=c(coef(myprobit),1.8, 0.5)
-# Some coefs from probit seem unintuitive, so will replace with values closer to
-# Gayle & Wu estimates
-# coefinit["pop"] = 4.5 # expect population to have positive effect
-# coefinit["Ncompet"] = -2 # expect Ncompet to have negative effect
-# 
-# # Testing w/ rho = 0.5, delta = 1
-#coefinit=c(-3,4, 2.5, 2,-8, 3.3,-0.5,0.05,1.5,0.5)
-
+# For SML, use results from trial run with S=100
+coefinit <- c(-0.067, 0.2, 0.015, 0.73, -0.326, 0.13, 0.24, 1.6, 0.614, 0.27, 0.68)
 
 ##### Simulation of error terms for SML N*M*S  
 set.seed(31497)
@@ -132,17 +98,27 @@ Calc_N<- function(s,matexpl,coef,uim,u0m){
     #Compute profits : 
     ind1=(m-1)*N+1
     rho=(exp(coef[nvar])-exp(-coef[nvar]))/(exp(coef[nvar])+exp(-coef[nvar])) #Reparametrization to get it between -1 and 1
-    profits = matexpl[ind1:(ind1+N-1),]%*%coef[1:(nvar-2)]+rho*rep(u0m[m,s],N)+sqrt(1-rho^2)*uim[ind1:(ind1+N-1),s]
+    profits = matexpl[ind1:(ind1+N-1),]%*%coef[1:(nvar-3)]+rho*rep(u0m[m,s],N)+sqrt(1-rho^2)*uim[ind1:(ind1+N-1),s]
     
     #Threshold 
-    delta=coef[nvar-1]
-    threshold=delta*log(seq(1,N,1))
+    delta_a=coef[nvar-1] # Delta for actual entrants
+    entrants <- seq(1,N,1) # Sequence from 1 to N number of possible entrants
     
-    ### Neq
+    delta_e=coef[nvar-2] # Delta for entry threats
+    Sum_City2 = sum(matexpl[ind1:(ind1+N-1),6]) # Sum of City 2 for market m
+    threats <- seq(Sum_City2-1, Sum_City2-N,-1) 
+    # Sequence for number of threats, decreasing as no. of entrants increases
+    threats[threats < 0] <- 0 # Set zero/negatives to 1 since log(1) = 0
+    
+    threshold=delta_a*log(entrants) + delta_e*log(threats+1) 
+    # Add 1 to threats b/c log(1) = 0
+    # Want negative effect of 1 threat but 0 effect for 1 entrant since that entrant = monopolist
+    
+    # Estimate number of firms for each entrant/threat combo
     above<-function(i){sum(profits>threshold[i])}
     nfirm=sum((sapply(seq(1,N,1),above)-seq(1,N,1))>=0)
     
-    return(c(1*(nfirm==matN[m])))
+    return(c(1*(nfirm==matN[m]))) # Check whether prediction matches observed value
     # return(c(nfirm))
   } 
   return(c(sapply(seq(1,M,1), Calc_N_m,s=s,matexpl=matexpl,coef=coef,uim=uim,u0m=u0m)))
@@ -168,7 +144,7 @@ start_time <- Sys.time()
 loglik(coefinit)
 end_time <- Sys.time()
 end_time - start_time
-# S=100 -> 5.4 secs (-> 100 iterations =  10 mins) -> 33 to finish
+# S=100 -> 6.5 secs (-> 100 iterations =  11 mins) -> 25-35 to finish
 # S=500 -> 40 seconds (-> 100 iterations = 66 mins)
 # S=1000 -> 53 secs (-> 100 iterations = 140 mins = 2.5 hrs) --> 11.5 hours!! to finish (569 iterations)
 
@@ -177,4 +153,13 @@ ml.res = nloptr(coefinit,loglik,opts=list("algorithm"="NLOPT_LN_COBYLA",print_le
 # optim(coefinit, loglik, control=list(trace=T,maxit=100, REPORT=1),method="BFGS") # trace=T, report=100
 end_time <- Sys.time()
 end_time - start_time 
+
+SML_results <- ml.res$solution
+names <- c("Constant", "Population", "Income", "Distance", "Distance^2", "City2", 
+           "Slot", "Hub", "No. Entry Threats", "No. Entrants", "Rho")
+names(SML_results) <- names
+SML_results["No. Entrants"] <- SML_results["No. Entrants"]*-1 # Multiply by negative one b/c this would be sign in profit eq'n
+SML_results["No. Entry Threats"] <- SML_results["No. Entry Threats"]*-1 # Multiply by negative one b/c this would be sign in profit eq'n
+
+saveRDS(ml.res, paste0(projdir, "SML_results.RData"))
 
