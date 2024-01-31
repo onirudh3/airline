@@ -81,7 +81,8 @@ myprobit <- glm(Y ~ pop+income+dist+dist2+City2+slot+hub, family = binomial(link
                  data = mydata)
 
 ## model summary
-summary(myprobit)  
+summary(myprobit)
+stargazer(myprobit) # latex table
 
 # For SML, use results from trial run with S=100
 coefinit <- c(-0.067, 0.2, 0.015, 0.73, -0.326, 0.13, 0.24, 1.6, 0.614, 0.27, 0.68)
