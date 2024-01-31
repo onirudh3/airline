@@ -66,6 +66,7 @@ myprobit <- glm(Y~ pop+dist+dist2+income+slot+City2+hub+Ncompet+Nthreats, family
 
 ## model summary
 summary(myprobit)  
+stargazer(myprobit) # latex table
 
 coefinit=c(coef(myprobit),1, -0.8)
 # Some coefs from probit seem unintuitive, so will replace with values closer to
